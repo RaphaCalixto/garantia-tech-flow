@@ -24,23 +24,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let mounted = true;
+    let timeoutId: NodeJS.Timeout;
+
+    // Timeout de segurança para não travar em loading infinito
+    timeoutId = setTimeout(() => {
+      if (mounted) {
+        console.warn('Auth timeout: Forçando loading = false após 5 segundos');
+        setLoading(false);
+      }
+    }, 5000);
+
     // Verificar sessão inicial
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+    supabase.auth.getSession()
+      .then(({ data: { session }, error }) => {
+        if (!mounted) return;
+        
+        if (error) {
+          console.error('Erro ao obter sessão:', error);
+        }
+        
+        setSession(session);
+        setUser(session?.user ?? null);
+        setLoading(false);
+        clearTimeout(timeoutId);
+      })
+      .catch((error) => {
+        if (!mounted) return;
+        console.error('Erro ao verificar sessão:', error);
+        setLoading(false);
+        clearTimeout(timeoutId);
+      });
 
     // Ouvir mudanças de autenticação
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
+      clearTimeout(timeoutId);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      clearTimeout(timeoutId);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signUp = async (email: string, password: string, userData: {
