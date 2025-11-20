@@ -3,11 +3,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Building2, Search, QrCode, Edit, Mail, Phone } from "lucide-react";
+import { Plus, Building2, Search, QrCode, Edit, Mail, Phone, Upload, FileSpreadsheet } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import * as XLSX from "xlsx";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const Customers = () => {
   const { toast } = useToast();
@@ -18,6 +26,7 @@ const Customers = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<string | null>(null);
+  const [showImportInstructions, setShowImportInstructions] = useState(false);
   
   // Estados do formulário
   const [formData, setFormData] = useState({
@@ -229,6 +238,126 @@ const Customers = () => {
     }));
   };
 
+  const downloadCustomerTemplate = () => {
+    const templateData = [
+      {
+        'Nome da Empresa': 'TechCorp Ltda',
+        'CNPJ': '12.345.678/0001-90',
+        'Nome do Contato': 'João Silva',
+        'E-mail': 'joao@techcorp.com',
+        'Telefone': '(11) 98765-4321',
+        'Endereço': 'Rua das Flores, 123, Centro'
+      },
+      {
+        'Nome da Empresa': 'InovaTech Solutions',
+        'CNPJ': '98.765.432/0001-10',
+        'Nome do Contato': 'Maria Santos',
+        'E-mail': 'maria@inovatech.com',
+        'Telefone': '(21) 91234-5678',
+        'Endereço': 'Av. Paulista, 1000, Bela Vista'
+      }
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(templateData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
+    XLSX.writeFile(wb, 'template_clientes.xlsx');
+
+    toast({
+      title: "Template baixado!",
+      description: "Preencha o template com seus dados e importe novamente.",
+    });
+    setShowImportInstructions(true);
+  };
+
+  const handleImportCustomers = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!user) {
+      toast({
+        title: "Erro",
+        description: "Você precisa estar logado para importar clientes.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
+
+      if (jsonData.length === 0) {
+        toast({
+          title: "Erro",
+          description: "O arquivo Excel está vazio.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Mapear campos do Excel para o formato do banco
+      const customersToInsert = [];
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const row of jsonData) {
+        try {
+          const nomeEmpresa = row['Nome da Empresa'] || row['nome_empresa'] || row['Empresa'] || row['empresa'] || '';
+          if (!nomeEmpresa) {
+            errorCount++;
+            continue;
+          }
+
+          customersToInsert.push({
+            user_id: user.id,
+            nome_empresa: nomeEmpresa,
+            cnpj: row['CNPJ'] || row['cnpj'] || null,
+            contato: row['Nome do Contato'] || row['nome_contato'] || row['Contato'] || row['contato'] || null,
+            email: row['E-mail'] || row['email'] || row['Email'] || null,
+            telefone: row['Telefone'] || row['telefone'] || null,
+            endereco: row['Endereço'] || row['endereco'] || row['Endereco'] || null,
+          });
+
+          successCount++;
+        } catch (error) {
+          console.error('Erro ao processar linha:', error);
+          errorCount++;
+        }
+      }
+
+      if (customersToInsert.length > 0) {
+        const { error } = await supabase
+          .from('customers')
+          .insert(customersToInsert);
+
+        if (error) {
+          throw error;
+        }
+      }
+
+      toast({
+        title: "Importação concluída!",
+        description: `${successCount} cliente(s) importado(s) com sucesso.${errorCount > 0 ? ` ${errorCount} erro(s) encontrado(s).` : ''}`,
+      });
+
+      await loadCustomers();
+    } catch (error: any) {
+      console.error('Erro ao importar clientes:', error);
+      toast({
+        title: "Erro na importação",
+        description: error.message || "Não foi possível importar os clientes. Verifique o formato do arquivo.",
+        variant: "destructive",
+      });
+    }
+
+    // Limpar input
+    event.target.value = '';
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b bg-card p-4 sticky top-0 z-10">
@@ -240,10 +369,39 @@ const Customers = () => {
               <p className="text-sm text-muted-foreground">Gerencie informações dos seus clientes</p>
             </div>
           </div>
-          <Button onClick={() => setShowForm(!showForm)} className="rounded-full">
-            <Plus className="h-4 w-4 mr-2" />
-            Novo Cliente
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={downloadCustomerTemplate}
+              className="rounded-full"
+            >
+              <FileSpreadsheet className="h-4 w-4 mr-2" />
+              Baixar Template
+            </Button>
+            <label htmlFor="import-customers" className="cursor-pointer">
+              <Button
+                variant="outline"
+                className="rounded-full"
+                asChild
+              >
+                <span>
+                  <Upload className="h-4 w-4 mr-2" />
+                  Importar Excel
+                </span>
+              </Button>
+              <input
+                id="import-customers"
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleImportCustomers}
+                className="hidden"
+              />
+            </label>
+            <Button onClick={() => setShowForm(!showForm)} className="rounded-full">
+              <Plus className="h-4 w-4 mr-2" />
+              Novo Cliente
+            </Button>
+          </div>
         </div>
       </header>
 

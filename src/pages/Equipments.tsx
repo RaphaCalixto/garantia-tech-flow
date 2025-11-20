@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Package, Search, Edit, Check, ChevronsUpDown, Building2, QrCode, Download, Printer, Eye, ArrowRight, ArrowLeft } from "lucide-react";
+import { Plus, Package, Search, Edit, Check, ChevronsUpDown, Building2, QrCode, Download, Printer, Eye, ArrowRight, ArrowLeft, Upload, FileSpreadsheet } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
@@ -12,6 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { QRCodeSVG } from "qrcode.react";
+import * as XLSX from "xlsx";
 import {
   Dialog,
   DialogContent,
@@ -41,6 +42,7 @@ const Equipments = () => {
   const [movementCustomerId, setMovementCustomerId] = useState<string>("");
   const [openMovementCustomerSelect, setOpenMovementCustomerSelect] = useState(false);
   const [movementObservacoes, setMovementObservacoes] = useState("");
+  const [showImportInstructions, setShowImportInstructions] = useState(false);
   
   // Estados do formulário
   const [formData, setFormData] = useState({
@@ -131,7 +133,7 @@ const Equipments = () => {
           name: eq.nome,
           serial: eq.numero_serie || '',
           sku: eq.sku || '',
-          customer: eq.customers?.nome_empresa || 'Empresa',
+          customer: eq.customers?.nome_empresa || 'Minha empresa',
           customer_id: eq.customer_id || null,
           model: eq.modelo || '',
           warranty,
@@ -223,6 +225,152 @@ const Equipments = () => {
 
   const handlePrintQRCode = () => {
     window.print();
+  };
+
+  const downloadEquipmentTemplate = () => {
+    const templateData = [
+      {
+        'Nome do Equipamento': 'Notebook Dell Inspiron',
+        'SKU/ID': 'EQ-ABC123',
+        'Número de Série': 'SN123456',
+        'Modelo': 'Inspiron 15',
+        'Quantidade': '1',
+        'Localização': 'Escritório Principal',
+        'Validade da Garantia': '2025-12-31',
+        'Cliente (Nome da Empresa)': 'TechCorp Ltda'
+      },
+      {
+        'Nome do Equipamento': 'Impressora HP LaserJet',
+        'SKU/ID': '',
+        'Número de Série': 'SN789012',
+        'Modelo': 'LaserJet Pro',
+        'Quantidade': '2',
+        'Localização': 'Sala de Reuniões',
+        'Validade da Garantia': '2026-06-30',
+        'Cliente (Nome da Empresa)': ''
+      }
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(templateData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Equipamentos');
+    XLSX.writeFile(wb, 'template_equipamentos.xlsx');
+
+    toast({
+      title: "Template baixado!",
+      description: "Preencha o template com seus dados e importe novamente.",
+    });
+    setShowImportInstructions(true);
+  };
+
+  const handleImportEquipments = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!user) {
+      toast({
+        title: "Erro",
+        description: "Você precisa estar logado para importar equipamentos.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
+
+      if (jsonData.length === 0) {
+        toast({
+          title: "Erro",
+          description: "O arquivo Excel está vazio.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Mapear campos do Excel para o formato do banco
+      const equipmentsToInsert = [];
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const row of jsonData) {
+        try {
+          const nome = row['Nome do Equipamento'] || row['nome_equipamento'] || row['Nome'] || '';
+          if (!nome) {
+            errorCount++;
+            continue;
+          }
+
+          // Buscar cliente pelo nome se fornecido
+          let customerId = null;
+          const clienteNome = row['Cliente (Nome da Empresa)'] || row['cliente'] || row['Cliente'] || '';
+          if (clienteNome) {
+            const customer = customers.find(c => 
+              c.nome_empresa.toLowerCase() === clienteNome.toLowerCase()
+            );
+            if (customer) {
+              customerId = customer.id;
+            }
+          }
+
+          // Gerar SKU se não fornecido
+          let sku = row['SKU/ID'] || row['sku'] || row['SKU'] || null;
+          if (!sku) {
+            const timestamp = Date.now().toString(36).toUpperCase();
+            const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+            sku = `EQ-${timestamp}-${random}`;
+          }
+
+          equipmentsToInsert.push({
+            user_id: user.id,
+            customer_id: customerId,
+            nome: nome,
+            numero_serie: row['Número de Série'] || row['numero_serie'] || row['Número de Serie'] || null,
+            sku: sku,
+            modelo: row['Modelo'] || row['modelo'] || null,
+            localizacao: row['Localização'] || row['localizacao'] || row['Localizacao'] || null,
+            garantia_validade: row['Validade da Garantia'] || row['validade_garantia'] || row['Garantia'] || null,
+            quantidade: parseInt(row['Quantidade'] || row['quantidade'] || '1') || 1,
+          });
+
+          successCount++;
+        } catch (error) {
+          console.error('Erro ao processar linha:', error);
+          errorCount++;
+        }
+      }
+
+      if (equipmentsToInsert.length > 0) {
+        const { error } = await supabase
+          .from('equipments')
+          .insert(equipmentsToInsert);
+
+        if (error) {
+          throw error;
+        }
+      }
+
+      toast({
+        title: "Importação concluída!",
+        description: `${successCount} equipamento(s) importado(s) com sucesso.${errorCount > 0 ? ` ${errorCount} erro(s) encontrado(s).` : ''}`,
+      });
+
+      await loadEquipments();
+    } catch (error: any) {
+      console.error('Erro ao importar equipamentos:', error);
+      toast({
+        title: "Erro na importação",
+        description: error.message || "Não foi possível importar os equipamentos. Verifique o formato do arquivo.",
+        variant: "destructive",
+      });
+    }
+
+    // Limpar input
+    event.target.value = '';
   };
 
   const handleShowHistory = async (equipment: any) => {
@@ -512,10 +660,39 @@ const Equipments = () => {
               <p className="text-sm text-muted-foreground">Gerencie todos os equipamentos e suas garantias</p>
             </div>
           </div>
-          <Button onClick={() => setShowForm(!showForm)} className="rounded-full">
-            <Plus className="h-4 w-4 mr-2" />
-            Novo Equipamento
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={downloadEquipmentTemplate}
+              className="rounded-full"
+            >
+              <FileSpreadsheet className="h-4 w-4 mr-2" />
+              Baixar Template
+            </Button>
+            <label htmlFor="import-equipments" className="cursor-pointer">
+              <Button
+                variant="outline"
+                className="rounded-full"
+                asChild
+              >
+                <span>
+                  <Upload className="h-4 w-4 mr-2" />
+                  Importar Excel
+                </span>
+              </Button>
+              <input
+                id="import-equipments"
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleImportEquipments}
+                className="hidden"
+              />
+            </label>
+            <Button onClick={() => setShowForm(!showForm)} className="rounded-full">
+              <Plus className="h-4 w-4 mr-2" />
+              Novo Equipamento
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -568,7 +745,7 @@ const Equipments = () => {
                         >
                           {selectedCustomer
                             ? selectedCustomer.nome_empresa
-                            : "Empresa (sem cliente)"}
+                            : "Minha empresa"}
                           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                         </Button>
                       </PopoverTrigger>
@@ -593,7 +770,7 @@ const Equipments = () => {
                                   )}
                                 />
                                 <Building2 className="mr-2 h-4 w-4" />
-                                <span className="italic">Empresa (sem cliente)</span>
+                                <span className="italic">Minha empresa</span>
                               </CommandItem>
                               {customers.map((customer) => (
                                 <CommandItem
@@ -739,7 +916,7 @@ const Equipments = () => {
                       </td>
                       <td className="p-3 text-foreground">
                         {equipment.customer_id ? equipment.customer : (
-                          <span className="text-muted-foreground italic">Empresa</span>
+                          <span className="text-muted-foreground italic">Minha empresa</span>
                         )}
                       </td>
                       <td className="p-3 text-muted-foreground">{equipment.model}</td>
@@ -1017,6 +1194,42 @@ const Equipments = () => {
                 </div>
               </form>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Dialog de instruções de importação */}
+        <Dialog open={showImportInstructions} onOpenChange={setShowImportInstructions}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Instruções para Importação de Equipamentos</DialogTitle>
+              <DialogDescription>
+                Para importar equipamentos via Excel, os campos precisam estar exatamente como no template.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="p-4 bg-muted rounded-lg">
+                <h4 className="font-semibold mb-2">Campos obrigatórios no Excel:</h4>
+                <ul className="list-disc list-inside space-y-1 text-sm">
+                  <li><strong>Nome do Equipamento</strong> - Obrigatório</li>
+                  <li><strong>SKU/ID</strong> - Opcional (será gerado automaticamente se vazio)</li>
+                  <li><strong>Número de Série</strong> - Opcional</li>
+                  <li><strong>Modelo</strong> - Opcional</li>
+                  <li><strong>Quantidade</strong> - Opcional (padrão: 1)</li>
+                  <li><strong>Localização</strong> - Opcional</li>
+                  <li><strong>Validade da Garantia</strong> - Opcional (formato: YYYY-MM-DD)</li>
+                  <li><strong>Cliente (Nome da Empresa)</strong> - Opcional (deixe vazio para "Minha empresa")</li>
+                </ul>
+              </div>
+              <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-900">
+                <p className="text-sm text-blue-900 dark:text-blue-100">
+                  <strong>💡 Dica:</strong> Copie os dados do seu Excel atual e cole no template baixado, mantendo os nomes das colunas exatamente como estão. 
+                  O nome do cliente deve corresponder exatamente ao nome cadastrado no sistema.
+                </p>
+              </div>
+              <Button onClick={() => setShowImportInstructions(false)} className="w-full">
+                Entendi
+              </Button>
+            </div>
           </DialogContent>
         </Dialog>
       </div>
