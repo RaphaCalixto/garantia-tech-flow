@@ -43,6 +43,7 @@ const Equipments = () => {
   const [openMovementCustomerSelect, setOpenMovementCustomerSelect] = useState(false);
   const [movementObservacoes, setMovementObservacoes] = useState("");
   const [movementQuantidade, setMovementQuantidade] = useState<string>("1");
+  const [movementData, setMovementData] = useState<string>("");
   const [showImportInstructions, setShowImportInstructions] = useState(false);
   
   // Estados do formulário
@@ -416,6 +417,8 @@ const Equipments = () => {
     setMovementCustomerId("");
     setMovementObservacoes("");
     setMovementQuantidade("1");
+    // Data padrão: hoje
+    setMovementData(new Date().toISOString().split('T')[0]);
     setShowMovementForm(true);
   };
 
@@ -444,6 +447,50 @@ const Equipments = () => {
         return;
       }
 
+      if (!movementData) {
+        toast({
+          title: "Erro",
+          description: "Selecione uma data para a movimentação.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Buscar quantidade atual do equipamento
+      const { data: equipmentData, error: equipmentError } = await supabase
+        .from('equipments')
+        .select('quantidade')
+        .eq('id', selectedEquipmentForHistory.id)
+        .eq('user_id', user.id)
+        .single();
+
+      if (equipmentError) {
+        throw equipmentError;
+      }
+
+      const quantidadeAtual = equipmentData?.quantidade || 0;
+      let novaQuantidade = quantidadeAtual;
+
+      // Calcular nova quantidade baseado no tipo de movimentação
+      if (movementType === 'entrada') {
+        novaQuantidade = quantidadeAtual + quantidade;
+      } else {
+        // Saída
+        novaQuantidade = quantidadeAtual - quantidade;
+        
+        if (novaQuantidade < 0) {
+          toast({
+            title: "Erro",
+            description: `Quantidade insuficiente. Disponível: ${quantidadeAtual}, tentando retirar: ${quantidade}`,
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
+      // Registrar movimentação no histórico
+      const dataMovimentacao = movementData ? new Date(movementData + 'T00:00:00').toISOString() : new Date().toISOString();
+      
       const { error } = await supabase
         .from('equipment_history')
         .insert({
@@ -453,6 +500,7 @@ const Equipments = () => {
           cliente_id: movementCustomerId || null,
           observacoes: movementObservacoes || null,
           quantidade: quantidade,
+          data_movimentacao: dataMovimentacao,
         });
 
       if (error) {
@@ -465,21 +513,21 @@ const Equipments = () => {
         return;
       }
 
-      // Se for saída, atualizar o cliente do equipamento
+      // Atualizar quantidade e cliente do equipamento
+      const updateData: any = { quantidade: novaQuantidade };
+      
       if (movementType === 'saida' && movementCustomerId) {
-        await supabase
-          .from('equipments')
-          .update({ customer_id: movementCustomerId })
-          .eq('id', selectedEquipmentForHistory.id)
-          .eq('user_id', user.id);
+        updateData.customer_id = movementCustomerId;
       } else if (movementType === 'entrada') {
         // Se for entrada, remover o cliente (volta para a empresa)
-        await supabase
-          .from('equipments')
-          .update({ customer_id: null })
-          .eq('id', selectedEquipmentForHistory.id)
-          .eq('user_id', user.id);
+        updateData.customer_id = null;
       }
+
+      await supabase
+        .from('equipments')
+        .update(updateData)
+        .eq('id', selectedEquipmentForHistory.id)
+        .eq('user_id', user.id);
 
       toast({
         title: "Movimentação registrada!",
@@ -490,6 +538,7 @@ const Equipments = () => {
       setMovementCustomerId("");
       setMovementObservacoes("");
       setMovementQuantidade("1");
+      setMovementData("");
       await loadEquipmentHistory(selectedEquipmentForHistory.id);
       await loadEquipments();
     } catch (error) {
@@ -1197,6 +1246,16 @@ const Equipments = () => {
                     </Popover>
                   </div>
                 )}
+                <div className="space-y-2">
+                  <Label htmlFor="movement-data">Data da Movimentação</Label>
+                  <Input
+                    id="movement-data"
+                    type="date"
+                    value={movementData}
+                    onChange={(e) => setMovementData(e.target.value)}
+                    required
+                  />
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="movement-quantidade">Quantidade</Label>
                   <Input
