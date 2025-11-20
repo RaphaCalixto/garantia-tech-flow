@@ -3,13 +3,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Package, Search, Edit, Check, ChevronsUpDown, Building2, QrCode, Download, Printer, Eye, ArrowRight, ArrowLeft, Upload, FileSpreadsheet } from "lucide-react";
+import { Plus, Package, Search, Edit, Check, ChevronsUpDown, Building2, QrCode, Download, Printer, Eye, ArrowRight, ArrowLeft, Upload, FileSpreadsheet, Trash2 } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { QRCodeSVG } from "qrcode.react";
 import * as XLSX from "xlsx";
@@ -57,6 +58,15 @@ const Equipments = () => {
     garantia_validade: "",
     quantidade: "1",
   });
+
+  // Estados para unidades individuais (com garantias diferentes)
+  interface EquipmentUnit {
+    numero_serie: string;
+    garantia_validade: string;
+    localizacao: string;
+  }
+  const [equipmentUnits, setEquipmentUnits] = useState<EquipmentUnit[]>([]);
+  const [useMultipleUnits, setUseMultipleUnits] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -192,6 +202,26 @@ const Equipments = () => {
       quantidade: "1",
     });
     setSelectedCustomerId("");
+    setEquipmentUnits([]);
+    setUseMultipleUnits(false);
+  };
+
+  const addEquipmentUnit = () => {
+    setEquipmentUnits([...equipmentUnits, {
+      numero_serie: "",
+      garantia_validade: "",
+      localizacao: formData.localizacao || "",
+    }]);
+  };
+
+  const removeEquipmentUnit = (index: number) => {
+    setEquipmentUnits(equipmentUnits.filter((_, i) => i !== index));
+  };
+
+  const updateEquipmentUnit = (index: number, field: keyof EquipmentUnit, value: string) => {
+    const updated = [...equipmentUnits];
+    updated[index] = { ...updated[index], [field]: value };
+    setEquipmentUnits(updated);
   };
 
   const handleShowQRCode = (equipment: any) => {
@@ -608,6 +638,20 @@ const Equipments = () => {
           skuValue = `EQ-${timestamp}-${random}`;
         }
 
+        // Verificar se está usando múltiplas unidades com garantias diferentes
+        const quantidade = parseInt(formData.quantidade) || 1;
+        const usarUnidadesMultiplas = useMultipleUnits && equipmentUnits.length > 0;
+
+        if (usarUnidadesMultiplas && equipmentUnits.length !== quantidade) {
+          toast({
+            title: "Erro",
+            description: `Você precisa cadastrar exatamente ${quantidade} unidade(s). Atualmente há ${equipmentUnits.length}.`,
+            variant: "destructive",
+          });
+          return;
+        }
+
+        // Criar equipamento base (sem garantia se usar unidades múltiplas)
         const { data: insertedData, error } = await supabase
           .from('equipments')
           .insert({
@@ -618,8 +662,8 @@ const Equipments = () => {
             sku: skuValue,
             modelo: formData.modelo || null,
             localizacao: formData.localizacao || null,
-            garantia_validade: formData.garantia_validade || null,
-            quantidade: parseInt(formData.quantidade) || 1,
+            garantia_validade: usarUnidadesMultiplas ? null : (formData.garantia_validade || null),
+            quantidade: quantidade,
           })
           .select()
           .single();
@@ -888,19 +932,132 @@ const Equipments = () => {
                       min="1"
                       placeholder="1" 
                       value={formData.quantidade}
-                      onChange={(e) => setFormData(prev => ({ ...prev, quantidade: e.target.value }))}
+                      onChange={(e) => {
+                        const qty = e.target.value;
+                        setFormData(prev => ({ ...prev, quantidade: qty }));
+                        // Se quantidade > 1, sugerir usar múltiplas unidades
+                        if (parseInt(qty) > 1 && !useMultipleUnits) {
+                          // Não forçar, apenas sugerir
+                        }
+                      }}
                       required
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="warranty">Validade da Garantia</Label>
-                    <Input 
-                      id="warranty" 
-                      type="date" 
-                      value={formData.garantia_validade}
-                      onChange={(e) => setFormData(prev => ({ ...prev, garantia_validade: e.target.value }))}
-                    />
-                  </div>
+                  {parseInt(formData.quantidade) > 1 && !editingEquipment && (
+                    <div className="space-y-2 p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-900">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label htmlFor="multiple-units">Cadastrar com garantias diferentes?</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Se você tem unidades com garantias diferentes, ative esta opção
+                          </p>
+                        </div>
+                        <Switch
+                          id="multiple-units"
+                          checked={useMultipleUnits}
+                          onCheckedChange={(checked) => {
+                            setUseMultipleUnits(checked);
+                            if (checked) {
+                              // Inicializar unidades baseado na quantidade
+                              const qty = parseInt(formData.quantidade) || 1;
+                              const newUnits: EquipmentUnit[] = [];
+                              for (let i = 0; i < qty; i++) {
+                                newUnits.push({
+                                  numero_serie: "",
+                                  garantia_validade: "",
+                                  localizacao: formData.localizacao || "",
+                                });
+                              }
+                              setEquipmentUnits(newUnits);
+                            } else {
+                              setEquipmentUnits([]);
+                            }
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {!useMultipleUnits && (
+                    <div className="space-y-2">
+                      <Label htmlFor="warranty">Validade da Garantia</Label>
+                      <Input 
+                        id="warranty" 
+                        type="date" 
+                        value={formData.garantia_validade}
+                        onChange={(e) => setFormData(prev => ({ ...prev, garantia_validade: e.target.value }))}
+                      />
+                    </div>
+                  )}
+                  {useMultipleUnits && (
+                    <div className="space-y-4 col-span-2">
+                      <div className="flex items-center justify-between">
+                        <Label>Unidades Individuais (com garantias diferentes)</Label>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={addEquipmentUnit}
+                        >
+                          <Plus className="h-4 w-4 mr-2" />
+                          Adicionar Unidade
+                        </Button>
+                      </div>
+                      {equipmentUnits.length === 0 && (
+                        <p className="text-sm text-muted-foreground text-center py-4">
+                          Clique em "Adicionar Unidade" para cadastrar cada unidade com sua garantia específica
+                        </p>
+                      )}
+                      {equipmentUnits.map((unit, index) => (
+                        <Card key={index} className="p-4">
+                          <div className="flex items-center justify-between mb-4">
+                            <h4 className="font-semibold">Unidade {index + 1}</h4>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => removeEquipmentUnit(index)}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
+                          <div className="grid gap-4 md:grid-cols-3">
+                            <div className="space-y-2">
+                              <Label>Número de Série (opcional)</Label>
+                              <Input
+                                value={unit.numero_serie}
+                                onChange={(e) => updateEquipmentUnit(index, 'numero_serie', e.target.value)}
+                                placeholder="SN123456"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Validade da Garantia</Label>
+                              <Input
+                                type="date"
+                                value={unit.garantia_validade}
+                                onChange={(e) => updateEquipmentUnit(index, 'garantia_validade', e.target.value)}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Localização (opcional)</Label>
+                              <Input
+                                value={unit.localizacao}
+                                onChange={(e) => updateEquipmentUnit(index, 'localizacao', e.target.value)}
+                                placeholder={formData.localizacao || "Localização"}
+                              />
+                            </div>
+                          </div>
+                        </Card>
+                      ))}
+                      {equipmentUnits.length > 0 && equipmentUnits.length !== parseInt(formData.quantidade) && (
+                        <p className="text-sm text-yellow-600 dark:text-yellow-400">
+                          Você tem {equipmentUnits.length} unidade(s) cadastrada(s), mas a quantidade é {formData.quantidade}. 
+                          {equipmentUnits.length < parseInt(formData.quantidade) 
+                            ? ' Adicione mais unidades ou ajuste a quantidade.' 
+                            : ' Ajuste a quantidade ou remova unidades.'}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <Button type="submit">
