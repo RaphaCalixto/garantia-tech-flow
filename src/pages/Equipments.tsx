@@ -42,6 +42,7 @@ const Equipments = () => {
   const [movementCustomerId, setMovementCustomerId] = useState<string>("");
   const [openMovementCustomerSelect, setOpenMovementCustomerSelect] = useState(false);
   const [movementObservacoes, setMovementObservacoes] = useState("");
+  const [movementQuantidade, setMovementQuantidade] = useState<string>("1");
   const [showImportInstructions, setShowImportInstructions] = useState(false);
   
   // Estados do formulário
@@ -414,6 +415,7 @@ const Equipments = () => {
     setMovementType(type);
     setMovementCustomerId("");
     setMovementObservacoes("");
+    setMovementQuantidade("1");
     setShowMovementForm(true);
   };
 
@@ -431,6 +433,17 @@ const Equipments = () => {
     }
 
     try {
+      const quantidade = parseInt(movementQuantidade) || 1;
+      
+      if (quantidade <= 0) {
+        toast({
+          title: "Erro",
+          description: "A quantidade deve ser maior que zero.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       const { error } = await supabase
         .from('equipment_history')
         .insert({
@@ -439,6 +452,7 @@ const Equipments = () => {
           tipo_movimentacao: movementType,
           cliente_id: movementCustomerId || null,
           observacoes: movementObservacoes || null,
+          quantidade: quantidade,
         });
 
       if (error) {
@@ -475,6 +489,7 @@ const Equipments = () => {
       setShowMovementForm(false);
       setMovementCustomerId("");
       setMovementObservacoes("");
+      setMovementQuantidade("1");
       await loadEquipmentHistory(selectedEquipmentForHistory.id);
       await loadEquipments();
     } catch (error) {
@@ -1078,16 +1093,28 @@ const Equipments = () => {
                             }`}>
                               {movement.tipo_movimentacao === 'saida' ? 'Saída' : 'Entrada'}
                             </span>
+                            {movement.quantidade && movement.quantidade > 1 && (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                                {movement.quantidade} unidades
+                              </span>
+                            )}
                           </div>
                           <span className="text-sm text-muted-foreground">
                             {new Date(movement.data_movimentacao).toLocaleString('pt-BR')}
                           </span>
                         </div>
-                        {movement.customers && (
-                          <p className="text-sm text-foreground mb-1">
-                            Cliente: <span className="font-medium">{movement.customers.nome_empresa}</span>
-                          </p>
-                        )}
+                        <div className="flex items-center gap-4 mb-1">
+                          {movement.quantidade && (
+                            <p className="text-sm text-foreground">
+                              Quantidade: <span className="font-medium">{movement.quantidade}</span>
+                            </p>
+                          )}
+                          {movement.customers && (
+                            <p className="text-sm text-foreground">
+                              Cliente: <span className="font-medium">{movement.customers.nome_empresa}</span>
+                            </p>
+                          )}
+                        </div>
                         {movement.observacoes && (
                           <p className="text-sm text-muted-foreground mt-2">
                             {movement.observacoes}
@@ -1170,6 +1197,21 @@ const Equipments = () => {
                     </Popover>
                   </div>
                 )}
+                <div className="space-y-2">
+                  <Label htmlFor="movement-quantidade">Quantidade</Label>
+                  <Input
+                    id="movement-quantidade"
+                    type="number"
+                    min="1"
+                    value={movementQuantidade}
+                    onChange={(e) => setMovementQuantidade(e.target.value)}
+                    placeholder="1"
+                    required
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Quantidade de equipamentos nesta movimentação
+                  </p>
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="movement-observacoes">Observações (opcional)</Label>
                   <textarea
