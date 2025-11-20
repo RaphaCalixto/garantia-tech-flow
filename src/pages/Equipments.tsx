@@ -842,7 +842,7 @@ const Equipments = () => {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="customer">Cliente (opcional - deixe vazio para equipamento da empresa)</Label>
+                    <Label htmlFor="customer">Cliente</Label>
                     <Popover open={openCustomerSelect} onOpenChange={setOpenCustomerSelect}>
                       <PopoverTrigger asChild>
                         <Button
