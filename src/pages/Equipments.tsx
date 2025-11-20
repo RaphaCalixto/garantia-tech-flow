@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Package, Search, Edit, Check, ChevronsUpDown, Building2, QrCode, Download, Printer } from "lucide-react";
+import { Plus, Package, Search, Edit, Check, ChevronsUpDown, Building2, QrCode, Download, Printer, Eye, ArrowRight, ArrowLeft } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
@@ -33,6 +33,14 @@ const Equipments = () => {
   const [editingEquipment, setEditingEquipment] = useState<string | null>(null);
   const [showQRCode, setShowQRCode] = useState(false);
   const [selectedEquipmentForQR, setSelectedEquipmentForQR] = useState<any>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [selectedEquipmentForHistory, setSelectedEquipmentForHistory] = useState<any>(null);
+  const [equipmentHistory, setEquipmentHistory] = useState<any[]>([]);
+  const [showMovementForm, setShowMovementForm] = useState(false);
+  const [movementType, setMovementType] = useState<'entrada' | 'saida'>('saida');
+  const [movementCustomerId, setMovementCustomerId] = useState<string>("");
+  const [openMovementCustomerSelect, setOpenMovementCustomerSelect] = useState(false);
+  const [movementObservacoes, setMovementObservacoes] = useState("");
   
   // Estados do formulário
   const [formData, setFormData] = useState({
@@ -123,8 +131,8 @@ const Equipments = () => {
           name: eq.nome,
           serial: eq.numero_serie || '',
           sku: eq.sku || '',
-          customer: eq.customers?.nome_empresa || '',
-          customer_id: eq.customer_id || '',
+          customer: eq.customers?.nome_empresa || 'Empresa',
+          customer_id: eq.customer_id || null,
           model: eq.modelo || '',
           warranty,
           warrantyStatus,
@@ -217,6 +225,120 @@ const Equipments = () => {
     window.print();
   };
 
+  const handleShowHistory = async (equipment: any) => {
+    setSelectedEquipmentForHistory(equipment);
+    setShowHistory(true);
+    await loadEquipmentHistory(equipment.id);
+  };
+
+  const loadEquipmentHistory = async (equipmentId: string) => {
+    if (!user) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('equipment_history')
+        .select(`
+          *,
+          customers(nome_empresa)
+        `)
+        .eq('equipment_id', equipmentId)
+        .eq('user_id', user.id)
+        .order('data_movimentacao', { ascending: false });
+
+      if (error) {
+        console.error('Erro ao carregar histórico:', error);
+        toast({
+          title: "Erro",
+          description: "Não foi possível carregar o histórico.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setEquipmentHistory(data || []);
+    } catch (error) {
+      console.error('Erro ao carregar histórico:', error);
+    }
+  };
+
+  const handleOpenMovementForm = (equipment: any, type: 'entrada' | 'saida') => {
+    setSelectedEquipmentForHistory(equipment);
+    setMovementType(type);
+    setMovementCustomerId("");
+    setMovementObservacoes("");
+    setShowMovementForm(true);
+  };
+
+  const handleRegisterMovement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !selectedEquipmentForHistory) return;
+
+    if (movementType === 'saida' && !movementCustomerId) {
+      toast({
+        title: "Erro",
+        description: "Selecione um cliente para registrar a saída.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('equipment_history')
+        .insert({
+          equipment_id: selectedEquipmentForHistory.id,
+          user_id: user.id,
+          tipo_movimentacao: movementType,
+          cliente_id: movementCustomerId || null,
+          observacoes: movementObservacoes || null,
+        });
+
+      if (error) {
+        console.error('Erro ao registrar movimentação:', error);
+        toast({
+          title: "Erro",
+          description: "Não foi possível registrar a movimentação.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Se for saída, atualizar o cliente do equipamento
+      if (movementType === 'saida' && movementCustomerId) {
+        await supabase
+          .from('equipments')
+          .update({ customer_id: movementCustomerId })
+          .eq('id', selectedEquipmentForHistory.id)
+          .eq('user_id', user.id);
+      } else if (movementType === 'entrada') {
+        // Se for entrada, remover o cliente (volta para a empresa)
+        await supabase
+          .from('equipments')
+          .update({ customer_id: null })
+          .eq('id', selectedEquipmentForHistory.id)
+          .eq('user_id', user.id);
+      }
+
+      toast({
+        title: "Movimentação registrada!",
+        description: `A ${movementType === 'entrada' ? 'entrada' : 'saída'} foi registrada com sucesso.`,
+      });
+
+      setShowMovementForm(false);
+      setMovementCustomerId("");
+      setMovementObservacoes("");
+      await loadEquipmentHistory(selectedEquipmentForHistory.id);
+      await loadEquipments();
+    } catch (error) {
+      console.error('Erro ao registrar movimentação:', error);
+      toast({
+        title: "Erro",
+        description: "Ocorreu um erro ao registrar a movimentação.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -229,14 +351,7 @@ const Equipments = () => {
       return;
     }
 
-    if (!formData.customer_id) {
-      toast({
-        title: "Erro",
-        description: "Selecione um cliente.",
-        variant: "destructive",
-      });
-      return;
-    }
+    // Cliente não é mais obrigatório - pode ser da empresa
 
     try {
       if (editingEquipment) {
@@ -244,7 +359,7 @@ const Equipments = () => {
         const { error } = await supabase
           .from('equipments')
           .update({
-            customer_id: formData.customer_id,
+            customer_id: formData.customer_id || null,
             nome: formData.nome,
             numero_serie: formData.numero_serie || null,
             sku: formData.sku || null,
@@ -285,7 +400,7 @@ const Equipments = () => {
           .from('equipments')
           .insert({
             user_id: user.id,
-            customer_id: formData.customer_id,
+            customer_id: formData.customer_id || null,
             nome: formData.nome,
             numero_serie: formData.numero_serie || null,
             sku: skuValue,
@@ -308,7 +423,7 @@ const Equipments = () => {
               .from('equipments')
               .insert({
                 user_id: user.id,
-                customer_id: formData.customer_id,
+                customer_id: formData.customer_id || null,
                 nome: formData.nome,
                 numero_serie: formData.numero_serie || null,
                 sku: newSku,
@@ -442,7 +557,7 @@ const Equipments = () => {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="customer">Cliente</Label>
+                    <Label htmlFor="customer">Cliente (opcional - deixe vazio para equipamento da empresa)</Label>
                     <Popover open={openCustomerSelect} onOpenChange={setOpenCustomerSelect}>
                       <PopoverTrigger asChild>
                         <Button
@@ -453,7 +568,7 @@ const Equipments = () => {
                         >
                           {selectedCustomer
                             ? selectedCustomer.nome_empresa
-                            : "Selecione um cliente..."}
+                            : "Empresa (sem cliente)"}
                           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                         </Button>
                       </PopoverTrigger>
@@ -463,6 +578,23 @@ const Equipments = () => {
                           <CommandList>
                             <CommandEmpty>Nenhum cliente encontrado.</CommandEmpty>
                             <CommandGroup>
+                              <CommandItem
+                                value="empresa"
+                                onSelect={() => {
+                                  setSelectedCustomerId("");
+                                  setFormData(prev => ({ ...prev, customer_id: "" }));
+                                  setOpenCustomerSelect(false);
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 h-4 w-4",
+                                    !selectedCustomerId ? "opacity-100" : "opacity-0"
+                                  )}
+                                />
+                                <Building2 className="mr-2 h-4 w-4" />
+                                <span className="italic">Empresa (sem cliente)</span>
+                              </CommandItem>
                               {customers.map((customer) => (
                                 <CommandItem
                                   key={customer.id}
@@ -605,7 +737,11 @@ const Equipments = () => {
                           </div>
                         </div>
                       </td>
-                      <td className="p-3 text-foreground">{equipment.customer}</td>
+                      <td className="p-3 text-foreground">
+                        {equipment.customer_id ? equipment.customer : (
+                          <span className="text-muted-foreground italic">Empresa</span>
+                        )}
+                      </td>
                       <td className="p-3 text-muted-foreground">{equipment.model}</td>
                       <td className="p-3 text-foreground font-medium">{equipment.quantidade || 1}</td>
                       <td className="p-3">
@@ -616,6 +752,15 @@ const Equipments = () => {
                       <td className="p-3 text-foreground">{equipment.location}</td>
                       <td className="p-3">
                         <div className="flex items-center gap-1">
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-8 w-8"
+                            onClick={() => handleShowHistory(equipment)}
+                            title="Ver histórico"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
                           <Button 
                             variant="ghost" 
                             size="icon" 
@@ -688,6 +833,189 @@ const Equipments = () => {
                   </Button>
                 </div>
               </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Dialog para exibir histórico */}
+        <Dialog open={showHistory} onOpenChange={setShowHistory}>
+          <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Histórico de Movimentações</DialogTitle>
+              <DialogDescription>
+                Histórico completo de entrada e saída do equipamento
+              </DialogDescription>
+            </DialogHeader>
+            {selectedEquipmentForHistory && (
+              <div className="space-y-4">
+                <div className="p-4 bg-muted rounded-lg">
+                  <p className="font-semibold text-lg">{selectedEquipmentForHistory.name}</p>
+                  <p className="text-sm text-muted-foreground">SKU: {selectedEquipmentForHistory.sku || selectedEquipmentForHistory.id}</p>
+                </div>
+                <div className="flex gap-2 mb-4">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleOpenMovementForm(selectedEquipmentForHistory, 'saida')}
+                    className="flex-1"
+                  >
+                    <ArrowRight className="h-4 w-4 mr-2" />
+                    Registrar Saída
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleOpenMovementForm(selectedEquipmentForHistory, 'entrada')}
+                    className="flex-1"
+                  >
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    Registrar Entrada
+                  </Button>
+                </div>
+                {equipmentHistory.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    Nenhuma movimentação registrada ainda
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {equipmentHistory.map((movement) => (
+                      <div
+                        key={movement.id}
+                        className={`p-4 rounded-lg border ${
+                          movement.tipo_movimentacao === 'saida'
+                            ? 'bg-red-50 border-red-200 dark:bg-red-950/20 dark:border-red-900'
+                            : 'bg-green-50 border-green-200 dark:bg-green-950/20 dark:border-green-900'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            {movement.tipo_movimentacao === 'saida' ? (
+                              <ArrowRight className="h-4 w-4 text-red-600 dark:text-red-400" />
+                            ) : (
+                              <ArrowLeft className="h-4 w-4 text-green-600 dark:text-green-400" />
+                            )}
+                            <span className={`font-semibold ${
+                              movement.tipo_movimentacao === 'saida'
+                                ? 'text-red-600 dark:text-red-400'
+                                : 'text-green-600 dark:text-green-400'
+                            }`}>
+                              {movement.tipo_movimentacao === 'saida' ? 'Saída' : 'Entrada'}
+                            </span>
+                          </div>
+                          <span className="text-sm text-muted-foreground">
+                            {new Date(movement.data_movimentacao).toLocaleString('pt-BR')}
+                          </span>
+                        </div>
+                        {movement.customers && (
+                          <p className="text-sm text-foreground mb-1">
+                            Cliente: <span className="font-medium">{movement.customers.nome_empresa}</span>
+                          </p>
+                        )}
+                        {movement.observacoes && (
+                          <p className="text-sm text-muted-foreground mt-2">
+                            {movement.observacoes}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Dialog para registrar movimentação */}
+        <Dialog open={showMovementForm} onOpenChange={setShowMovementForm}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>
+                Registrar {movementType === 'saida' ? 'Saída' : 'Entrada'} de Equipamento
+              </DialogTitle>
+              <DialogDescription>
+                {movementType === 'saida' 
+                  ? 'Registre quando o equipamento for vendido ou entregue a um cliente.'
+                  : 'Registre quando o equipamento retornar à empresa.'}
+              </DialogDescription>
+            </DialogHeader>
+            {selectedEquipmentForHistory && (
+              <form onSubmit={handleRegisterMovement} className="space-y-4">
+                <div className="p-4 bg-muted rounded-lg">
+                  <p className="font-semibold">{selectedEquipmentForHistory.name}</p>
+                  <p className="text-sm text-muted-foreground">SKU: {selectedEquipmentForHistory.sku || selectedEquipmentForHistory.id}</p>
+                </div>
+                {movementType === 'saida' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="movement-customer">Cliente (obrigatório para saída)</Label>
+                    <Popover open={openMovementCustomerSelect} onOpenChange={setOpenMovementCustomerSelect}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={openMovementCustomerSelect}
+                          className="w-full justify-between"
+                        >
+                          {movementCustomerId
+                            ? customers.find(c => c.id === movementCustomerId)?.nome_empresa
+                            : "Selecione um cliente..."}
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[400px] p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="Buscar cliente..." />
+                          <CommandList>
+                            <CommandEmpty>Nenhum cliente encontrado.</CommandEmpty>
+                            <CommandGroup>
+                              {customers.map((customer) => (
+                                <CommandItem
+                                  key={customer.id}
+                                  value={customer.nome_empresa}
+                                  onSelect={() => {
+                                    setMovementCustomerId(customer.id);
+                                    setOpenMovementCustomerSelect(false);
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      movementCustomerId === customer.id ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  <Building2 className="mr-2 h-4 w-4" />
+                                  {customer.nome_empresa}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label htmlFor="movement-observacoes">Observações (opcional)</Label>
+                  <textarea
+                    id="movement-observacoes"
+                    value={movementObservacoes}
+                    onChange={(e) => setMovementObservacoes(e.target.value)}
+                    className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    placeholder="Ex: Venda realizada, equipamento entregue, etc."
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button type="submit" className="flex-1">
+                    Registrar {movementType === 'saida' ? 'Saída' : 'Entrada'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowMovementForm(false)}
+                  >
+                    Cancelar
+                  </Button>
+                </div>
+              </form>
             )}
           </DialogContent>
         </Dialog>

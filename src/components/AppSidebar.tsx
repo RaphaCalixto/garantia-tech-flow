@@ -19,9 +19,9 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 
 const items = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
+  { title: "Clientes", url: "/customers", icon: Users },
   { title: "Equipamentos", url: "/equipments", icon: Package },
   { title: "Manutenções", url: "/maintenance", icon: Wrench },
-  { title: "Clientes", url: "/customers", icon: Users },
   { title: "Rastreamento QR Code", url: "/qrcode-tracking", icon: QrCode },
   { title: "Relatórios", url: "/reports", icon: FileText },
 ];
