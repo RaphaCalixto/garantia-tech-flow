@@ -654,6 +654,39 @@ const Customers = () => {
             )}
           </CardContent>
         </Card>
+
+        {/* Dialog de instruções de importação */}
+        <Dialog open={showImportInstructions} onOpenChange={setShowImportInstructions}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Instruções para Importação de Clientes</DialogTitle>
+              <DialogDescription>
+                Para importar clientes via Excel, os campos precisam estar exatamente como no template.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="p-4 bg-muted rounded-lg">
+                <h4 className="font-semibold mb-2">Campos obrigatórios no Excel:</h4>
+                <ul className="list-disc list-inside space-y-1 text-sm">
+                  <li><strong>Nome da Empresa</strong> - Obrigatório</li>
+                  <li><strong>CNPJ</strong> - Opcional</li>
+                  <li><strong>Nome do Contato</strong> - Opcional</li>
+                  <li><strong>E-mail</strong> - Opcional</li>
+                  <li><strong>Telefone</strong> - Opcional</li>
+                  <li><strong>Endereço</strong> - Opcional</li>
+                </ul>
+              </div>
+              <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-900">
+                <p className="text-sm text-blue-900 dark:text-blue-100">
+                  <strong>💡 Dica:</strong> Copie os dados do seu Excel atual e cole no template baixado, mantendo os nomes das colunas exatamente como estão.
+                </p>
+              </div>
+              <Button onClick={() => setShowImportInstructions(false)} className="w-full">
+                Entendi
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
