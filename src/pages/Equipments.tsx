@@ -121,6 +121,16 @@ const Equipments = () => {
       const thirtyDaysFromNow = new Date();
       thirtyDaysFromNow.setDate(now.getDate() + 30);
 
+      // Agrupar equipamentos por SKU para identificar unidades do mesmo produto
+      const equipmentsBySku: { [key: string]: any[] } = {};
+      (data || []).forEach((eq: any) => {
+        const sku = eq.sku || 'sem-sku';
+        if (!equipmentsBySku[sku]) {
+          equipmentsBySku[sku] = [];
+        }
+        equipmentsBySku[sku].push(eq);
+      });
+
       const equipmentsList = (data || []).map((eq: any) => {
         let warranty = "Sem garantia";
         let warrantyStatus = "none";
@@ -140,6 +150,13 @@ const Equipments = () => {
           }
         }
 
+        // Identificar número da unidade (se houver múltiplas unidades com mesmo SKU)
+        const sku = eq.sku || 'sem-sku';
+        const unidadesComMesmoSku = equipmentsBySku[sku] || [];
+        const indiceUnidade = unidadesComMesmoSku.findIndex((e: any) => e.id === eq.id);
+        const totalUnidades = unidadesComMesmoSku.length;
+        const numeroUnidade = totalUnidades > 1 ? indiceUnidade + 1 : null;
+
         return {
           id: eq.id,
           name: eq.nome,
@@ -153,6 +170,8 @@ const Equipments = () => {
           location: eq.localizacao || '',
           garantia_validade: eq.garantia_validade || '',
           quantidade: eq.quantidade || 1,
+          numeroUnidade: numeroUnidade, // Número da unidade (1, 2, 3, etc)
+          totalUnidades: totalUnidades > 1 ? totalUnidades : null, // Total de unidades com mesmo SKU
         };
       });
 
@@ -1162,7 +1181,12 @@ const Equipments = () => {
                     {filteredEquipments.map((equipment) => (
                     <tr key={equipment.id} className="border-b hover:bg-muted/30 transition-colors">
                       <td className="p-3">
-                        <span className="font-medium text-foreground">{equipment.sku || equipment.id}</span>
+                        <div>
+                          <span className="font-medium text-foreground">{equipment.sku || equipment.id}</span>
+                          {equipment.numeroUnidade && (
+                            <p className="text-xs text-muted-foreground mt-1">ID: {equipment.id.substring(0, 8)}...</p>
+                          )}
+                        </div>
                       </td>
                       <td className="p-3">
                         <div className="flex items-center gap-2">
@@ -1170,7 +1194,14 @@ const Equipments = () => {
                             <Package className="h-4 w-4 text-primary" />
                           </div>
                           <div>
-                            <p className="font-medium text-foreground">{equipment.name}</p>
+                            <p className="font-medium text-foreground">
+                              {equipment.name}
+                              {equipment.numeroUnidade && (
+                                <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary font-medium">
+                                  Unidade {equipment.numeroUnidade} de {equipment.totalUnidades}
+                                </span>
+                              )}
+                            </p>
                             <p className="text-xs text-muted-foreground">{equipment.serial}</p>
                           </div>
                         </div>
@@ -1250,7 +1281,13 @@ const Equipments = () => {
                 </div>
                 <div className="text-center">
                   <p className="font-semibold text-lg">{selectedEquipmentForQR.name}</p>
-                  <p className="text-sm text-muted-foreground">SKU/ID: {selectedEquipmentForQR.sku || selectedEquipmentForQR.id}</p>
+                  {selectedEquipmentForQR.numeroUnidade && (
+                    <p className="text-sm font-medium text-primary mb-1">
+                      Unidade {selectedEquipmentForQR.numeroUnidade} de {selectedEquipmentForQR.totalUnidades}
+                    </p>
+                  )}
+                  <p className="text-sm text-muted-foreground">SKU: {selectedEquipmentForQR.sku || 'N/A'}</p>
+                  <p className="text-xs text-muted-foreground mt-1">ID Único: {selectedEquipmentForQR.id.substring(0, 20)}...</p>
                 </div>
                 <div className="flex gap-2 w-full">
                   <Button 
