@@ -52,21 +52,39 @@ const QRCodeTracking = () => {
     try {
       setLoading(true);
       
-      // Buscar equipamento pelo SKU
-      const { data: equipmentData, error: equipmentError } = await supabase
+      // Buscar equipamento pelo ID (do QR Code) ou SKU (fallback para compatibilidade)
+      let { data: equipmentData, error: equipmentError } = await supabase
         .from('equipments')
         .select(`
           *,
           customers(nome_empresa, email, telefone, endereco)
         `)
-        .eq('sku', skuInput.trim())
+        .eq('id', skuInput.trim())
         .eq('user_id', user.id)
         .single();
+
+      // Se não encontrar por ID, tentar buscar por SKU (compatibilidade com QR Codes antigos)
+      if (equipmentError || !equipmentData) {
+        const { data: equipmentBySku, error: errorBySku } = await supabase
+          .from('equipments')
+          .select(`
+            *,
+            customers(nome_empresa, email, telefone, endereco)
+          `)
+          .eq('sku', skuInput.trim())
+          .eq('user_id', user.id)
+          .single();
+        
+        if (!errorBySku && equipmentBySku) {
+          equipmentData = equipmentBySku;
+          equipmentError = null;
+        }
+      }
 
       if (equipmentError || !equipmentData) {
         toast({
           title: "Equipamento não encontrado",
-          description: "Nenhum equipamento encontrado com este SKU/ID.",
+          description: "Nenhum equipamento encontrado com este ID. Verifique se o QR Code foi escaneado corretamente.",
           variant: "destructive",
         });
         setEquipment(null);
@@ -187,16 +205,34 @@ const QRCodeTracking = () => {
     try {
       setLoading(true);
       
-      // Buscar equipamento pelo SKU
-      const { data: equipmentData, error: equipmentError } = await supabase
+      // Buscar equipamento pelo ID (do QR Code) ou SKU (fallback para compatibilidade)
+      let { data: equipmentData, error: equipmentError } = await supabase
         .from('equipments')
         .select(`
           *,
           customers(nome_empresa, email, telefone, endereco)
         `)
-        .eq('sku', sku.trim())
+        .eq('id', sku.trim())
         .eq('user_id', user.id)
         .single();
+
+      // Se não encontrar por ID, tentar buscar por SKU (compatibilidade com QR Codes antigos)
+      if (equipmentError || !equipmentData) {
+        const { data: equipmentBySku, error: errorBySku } = await supabase
+          .from('equipments')
+          .select(`
+            *,
+            customers(nome_empresa, email, telefone, endereco)
+          `)
+          .eq('sku', sku.trim())
+          .eq('user_id', user.id)
+          .single();
+        
+        if (!errorBySku && equipmentBySku) {
+          equipmentData = equipmentBySku;
+          equipmentError = null;
+        }
+      }
 
       if (equipmentError || !equipmentData) {
         toast({
@@ -321,10 +357,10 @@ const QRCodeTracking = () => {
           <CardContent>
             <div className="flex gap-2">
               <div className="flex-1">
-                <Label htmlFor="sku">SKU/ID do Equipamento</Label>
+                <Label htmlFor="sku">ID do Equipamento (do QR Code)</Label>
                 <Input
                   id="sku"
-                  placeholder="Digite ou escaneie o SKU/ID"
+                  placeholder="Escaneie o QR Code ou digite o ID"
                   value={skuInput}
                   onChange={(e) => setSkuInput(e.target.value)}
                   onKeyPress={handleKeyPress}

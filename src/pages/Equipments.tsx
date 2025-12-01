@@ -247,7 +247,7 @@ const Equipments = () => {
       const pngFile = canvas.toDataURL('image/png');
       
       const downloadLink = document.createElement('a');
-      downloadLink.download = `QRCode-${selectedEquipmentForQR.sku || selectedEquipmentForQR.id}.png`;
+      downloadLink.download = `QRCode-${selectedEquipmentForQR.id}.png`;
       downloadLink.href = pngFile;
       downloadLink.click();
     };
@@ -1202,7 +1202,7 @@ const Equipments = () => {
                 <div className="p-4 bg-white rounded-lg border-2 border-gray-200">
                   <QRCodeSVG
                     id="qr-code-svg"
-                    value={selectedEquipmentForQR.sku || selectedEquipmentForQR.id}
+                    value={selectedEquipmentForQR.id}
                     size={256}
                     level="H"
                     includeMargin={true}
