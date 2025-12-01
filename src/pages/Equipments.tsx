@@ -651,25 +651,64 @@ const Equipments = () => {
           return;
         }
 
-        // Criar equipamento base (sem garantia se usar unidades múltiplas)
-        const { data: insertedData, error } = await supabase
-          .from('equipments')
-          .insert({
-            user_id: user.id,
-            customer_id: formData.customer_id || null,
-            nome: formData.nome,
-            numero_serie: formData.numero_serie || null,
-            sku: skuValue,
-            modelo: formData.modelo || null,
-            localizacao: formData.localizacao || null,
-            garantia_validade: usarUnidadesMultiplas ? null : (formData.garantia_validade || null),
-            quantidade: quantidade,
-          })
-          .select()
-          .single();
+        // Se quantidade > 1, criar um registro para cada unidade física
+        // Cada unidade terá seu próprio ID único e QR Code
+        if (quantidade > 1 && !usarUnidadesMultiplas) {
+          const equipmentsToInsert = [];
+          
+          for (let i = 0; i < quantidade; i++) {
+            equipmentsToInsert.push({
+              user_id: user.id,
+              customer_id: formData.customer_id || null,
+              nome: formData.nome,
+              numero_serie: formData.numero_serie || null,
+              sku: skuValue, // Mesmo SKU para todas as unidades
+              modelo: formData.modelo || null,
+              localizacao: formData.localizacao || null,
+              garantia_validade: formData.garantia_validade || null,
+              quantidade: 1, // Cada registro representa 1 unidade física
+            });
+          }
 
-        // Se houver erro de SKU duplicado, tentar novamente com outro SKU
-        if (error) {
+          const { data: insertedData, error } = await supabase
+            .from('equipments')
+            .insert(equipmentsToInsert)
+            .select();
+
+          if (error) {
+            console.error('Erro ao cadastrar equipamentos:', error);
+            toast({
+              title: "Erro ao cadastrar",
+              description: error.message || "Não foi possível cadastrar os equipamentos.",
+              variant: "destructive",
+            });
+            return;
+          }
+
+          toast({
+            title: "Equipamentos cadastrados!",
+            description: `${quantidade} unidade(s) foram cadastradas com sucesso. Cada unidade possui seu próprio QR Code.`,
+          });
+        } else {
+          // Criar equipamento único (quantidade = 1 ou unidades múltiplas com garantias diferentes)
+          const { data: insertedData, error } = await supabase
+            .from('equipments')
+            .insert({
+              user_id: user.id,
+              customer_id: formData.customer_id || null,
+              nome: formData.nome,
+              numero_serie: formData.numero_serie || null,
+              sku: skuValue,
+              modelo: formData.modelo || null,
+              localizacao: formData.localizacao || null,
+              garantia_validade: usarUnidadesMultiplas ? null : (formData.garantia_validade || null),
+              quantidade: quantidade,
+            })
+            .select()
+            .single();
+
+          // Se houver erro de SKU duplicado, tentar novamente com outro SKU
+          if (error) {
           if (error.code === '23505' && error.message.includes('sku')) {
             const timestamp = Date.now().toString(36).toUpperCase();
             const random = Math.random().toString(36).substring(2, 6).toUpperCase();
@@ -707,12 +746,13 @@ const Equipments = () => {
             });
             return;
           }
-        }
+          }
 
-        toast({
-          title: "Equipamento cadastrado!",
-          description: "O equipamento foi adicionado com sucesso.",
-        });
+          toast({
+            title: "Equipamento cadastrado!",
+            description: "O equipamento foi adicionado com sucesso.",
+          });
+        }
       }
 
       // Limpar formulário
